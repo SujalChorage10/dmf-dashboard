@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FDA DMF Intelligence Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2333;
+    --border: #21262d; --accent: #3b82f6; --accent2: #10b981;
+    --accent3: #f59e0b; --accent4: #ef4444; --accent5: #8b5cf6;
+    --text: #e6edf3; --muted: #7d8590;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── Header ── */
+  .header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 20px 32px; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 200;
+  }
+  .header-left { display: flex; align-items: center; gap: 16px; }
+  .logo {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent5));
+    border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px;
+  }
+  .header h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
+  .header p { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .upload-area { display: flex; align-items: center; gap: 10px; }
+  .upload-btn {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 9px 18px; font-size: 13px; font-weight: 500; cursor: pointer;
+    display: flex; align-items: center; gap: 7px; transition: opacity .2s;
+  }
+  .upload-btn:hover { opacity: .85; }
+  #file-input { display: none; }
+  .upload-status { font-size: 12px; color: var(--muted); }
+
+  /* ── Loading ── */
+  #loading {
+    display: none; position: fixed; inset: 0;
+    background: rgba(13,17,23,.85); z-index: 999;
+    align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+  }
+  #loading.show { display: flex; }
+  .spinner {
+    width: 44px; height: 44px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Main ── */
+  .main { padding: 28px 32px; max-width: 1600px; margin: 0 auto; }
+
+  /* ── Filter Bar ── */
+  .filter-bar {
+    display: flex; gap: 10px; align-items: flex-start;
+    margin-bottom: 24px; flex-wrap: wrap;
+  }
+  .filter-label { font-size: 12px; color: var(--muted); padding-top: 9px; white-space: nowrap; }
+  .filter-actions { display: flex; align-items: center; gap: 8px; padding-top: 6px; }
+  .btn-reset {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 7px; padding: 6px 12px; font-size: 12px; cursor: pointer; transition: all .15s;
+  }
+  .btn-reset:hover { border-color: var(--accent4); color: var(--accent4); }
+  #filter-count { font-size: 12px; color: var(--muted); }
+
+  /* ── Custom Multi-Select Dropdown ── */
+  .ms-wrap { position: relative; }
+  .ms-trigger {
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 7px 32px 7px 12px;
+    font-size: 13px; cursor: pointer; min-width: 150px; max-width: 220px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    user-select: none; position: relative; transition: border-color .15s;
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  }
+  .ms-trigger:hover, .ms-trigger.open { border-color: var(--accent); }
+  .ms-trigger .ms-arrow {
+    flex-shrink: 0; transition: transform .2s;
+    color: var(--muted);
+  }
+  .ms-trigger.open .ms-arrow { transform: rotate(180deg); }
+  .ms-trigger .ms-label { overflow: hidden; text-overflow: ellipsis; }
+
+  .ms-dropdown {
+    display: none; position: absolute; top: calc(100% + 5px); left: 0;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; min-width: 240px; max-width: 320px;
+    z-index: 500; box-shadow: 0 8px 32px rgba(0,0,0,.5);
+    overflow: hidden;
+  }
+  .ms-dropdown.open { display: block; }
+
+  .ms-search {
+    padding: 10px 12px 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ms-search input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); padding: 6px 10px; font-size: 12px;
+    outline: none;
+  }
+  .ms-search input:focus { border-color: var(--accent); }
+
+  .ms-actions {
+    display: flex; gap: 6px; padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ms-actions button {
+    background: transparent; border: none; color: var(--accent);
+    font-size: 11px; cursor: pointer; padding: 2px 0;
+  }
+  .ms-actions button:hover { text-decoration: underline; }
+  .ms-actions .sep { color: var(--border); }
+
+  .ms-list {
+    max-height: 240px; overflow-y: auto;
+    padding: 4px 0;
+  }
+  .ms-list::-webkit-scrollbar { width: 4px; }
+  .ms-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .ms-option {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px; cursor: pointer; font-size: 13px;
+    transition: background .1s;
+  }
+  .ms-option:hover { background: rgba(59,130,246,.08); }
+  .ms-option.selected { background: rgba(59,130,246,.06); }
+  .ms-option input[type=checkbox] {
+    width: 14px; height: 14px; accent-color: var(--accent);
+    flex-shrink: 0; cursor: pointer;
+  }
+  .ms-option .opt-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ms-option .opt-count {
+    font-size: 10px; color: var(--muted);
+    font-family: 'JetBrains Mono', monospace; flex-shrink: 0;
+  }
+  .ms-empty { padding: 12px 14px; font-size: 12px; color: var(--muted); text-align: center; }
+
+  /* badge on trigger */
+  .ms-badge {
+    background: var(--accent); color: #fff;
+    border-radius: 10px; font-size: 10px; font-weight: 600;
+    padding: 1px 6px; flex-shrink: 0;
+  }
+
+  /* ── KPIs ── */
+  .kpi-grid {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 24px;
+  }
+  @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(3,1fr); } }
+  @media (max-width: 640px)  { .kpi-grid { grid-template-columns: repeat(2,1fr); } }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px; position: relative; overflow: hidden; transition: border-color .2s;
+  }
+  .kpi:hover { border-color: var(--accent); }
+  .kpi-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+  .kpi-value { font-size: 26px; font-weight: 700; font-family: 'JetBrains Mono', monospace; letter-spacing: -1px; line-height: 1; }
+  .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 5px; }
+  .kpi-bar { position: absolute; bottom: 0; left: 0; height: 3px; border-radius: 0 0 12px 12px; }
+  .c1{color:var(--accent)}.b1{background:var(--accent)}
+  .c2{color:var(--accent2)}.b2{background:var(--accent2)}
+  .c3{color:var(--accent4)}.b3{background:var(--accent4)}
+  .c4{color:var(--accent3)}.b4{background:var(--accent3)}
+  .c5{color:var(--accent5)}.b5{background:var(--accent5)}
+  .c6{color:#38bdf8}.b6{background:#38bdf8}
+
+  /* ── Charts ── */
+  .chart-row { display: grid; gap: 18px; margin-bottom: 18px; }
+  .r2  { grid-template-columns: 1fr 1fr; }
+  .r32 { grid-template-columns: 2fr 1fr; }
+  @media (max-width: 900px) { .r2,.r32 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 22px 24px; transition: border-color .2s;
+  }
+  .card:hover { border-color: #2d333b; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .card-sub { font-size: 11px; color: var(--muted); margin-bottom: 18px; }
+  .chart-wrap { position: relative; }
+
+  /* ── Tables ── */
+  .data-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+  .data-table th {
+    text-align: left; padding: 7px 10px; font-size: 10px;
+    text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+    border-bottom: 1px solid var(--border); font-weight: 500;
+  }
+  .data-table td { padding: 8px 10px; border-bottom: 1px solid #1a1f27; color: var(--text); }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: var(--surface2); }
+  .rank-num { font-family: 'JetBrains Mono', monospace; color: var(--muted); font-size: 11px; width: 22px; display: inline-block; text-align: right; }
+  .bar-inline { display: inline-block; height: 6px; border-radius: 3px; background: var(--accent); vertical-align: middle; margin-left: 8px; }
+  .table-scroll { max-height: 340px; overflow-y: auto; }
+  .table-scroll::-webkit-scrollbar { width: 4px; }
+  .table-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  /* ── Section Labels ── */
+  .section-label {
+    font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px;
+    margin: 28px 0 14px; display: flex; align-items: center; gap: 10px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  /* ── Empty State ── */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 220px; color: var(--muted); gap: 10px;
+  }
+  .empty-state .icon { font-size: 36px; opacity: .3; }
+  .empty-state p { font-size: 13px; }
+
+  .footer { text-align: center; color: var(--muted); font-size: 11px; padding: 24px 0 32px; }
+
+  #paretoChart { cursor: crosshair; }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div style="font-size:13px;color:var(--muted);">Processing data…</div>
+</div>
+
+<header class="header">
+  <div class="header-left">
+    <div class="logo">⬡</div>
+    <div>
+      <h1>FDA DMF Intelligence Dashboard</h1>
+      <p id="last-update">No data loaded — upload your DMF Excel file to begin</p>
+    </div>
+  </div>
+  <div class="upload-area">
+    <span class="upload-status" id="upload-status"></span>
+    <button class="upload-btn" onclick="document.getElementById('file-input').click()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Upload New Data
+    </button>
+    <input type="file" id="file-input" accept=".xlsx,.xls" onchange="handleFile(this)">
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- Filter Bar -->
+  <div class="filter-bar" id="filter-bar">
+    <span class="filter-label">Filter by:</span>
+    <!-- Status -->
+    <div class="ms-wrap" id="ms-status"></div>
+    <!-- Type -->
+    <div class="ms-wrap" id="ms-type"></div>
+    <!-- Year From -->
+    <div class="ms-wrap" id="ms-year-from"></div>
+    <!-- Year To -->
+    <div class="ms-wrap" id="ms-year-to"></div>
+    <!-- Holder -->
+    <div class="ms-wrap" id="ms-holder"></div>
+    <div class="filter-actions">
+      <button class="btn-reset" onclick="resetAllFilters()">✕ Reset All</button>
+      <span id="filter-count"></span>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="kpi-grid" id="kpi-grid">
+    <div class="empty-state" style="grid-column:1/-1;">
+      <div class="icon">📁</div>
+      <p>Upload a DMF Excel file to load the dashboard</p>
+    </div>
+  </div>
+
+  <div class="section-label">Filing Activity</div>
+  <div class="chart-row r32">
+    <div class="card">
+      <div class="card-title">DMF Filings by Year</div>
+      <div class="card-sub">Annual submission volume since first filing</div>
+      <div class="chart-wrap"><canvas id="trendChart" height="220"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">DMF Type Distribution</div>
+      <div class="card-sub">Breakdown by DMF category</div>
+      <div class="chart-wrap"><canvas id="typeChart" height="220"></canvas></div>
+    </div>
+  </div>
+
+  <div class="section-label">Lifecycle & Status</div>
+  <div class="chart-row r2">
+    <div class="card">
+      <div class="card-title">Active vs Inactive by DMF Type</div>
+      <div class="card-sub">Portfolio status across all categories</div>
+      <div class="chart-wrap"><canvas id="stackedTypeChart" height="220"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Active Rate by Filing Year</div>
+      <div class="card-sub">% of DMFs filed in a given year still active today</div>
+      <div class="chart-wrap"><canvas id="activeRateChart" height="220"></canvas></div>
+    </div>
+  </div>
+
+  <div class="section-label">Trend Depth</div>
+  <div class="chart-row r2">
+    <div class="card">
+      <div class="card-title">Filing Trend by DMF Type</div>
+      <div class="card-sub">Multi-series annual volume per type</div>
+      <div class="chart-wrap"><canvas id="typeTrendChart" height="230"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Cumulative DMF Growth</div>
+      <div class="card-sub">Total DMFs ever filed — long-term database expansion</div>
+      <div class="chart-wrap"><canvas id="cumulativeChart" height="230"></canvas></div>
+    </div>
+  </div>
+
+  <div class="section-label">Holder & Subject Intelligence</div>
+  <div class="chart-row r2">
+    <div class="card">
+      <div class="card-title">Top 20 Holders by Total DMFs</div>
+      <div class="card-sub">Companies with the most filings</div>
+      <div class="table-scroll" id="holders-table-wrap"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Top 20 Active-DMF Holders</div>
+      <div class="card-sub">Companies maintaining the most live portfolio</div>
+      <div class="table-scroll" id="active-holders-table-wrap"></div>
+    </div>
+  </div>
+
+  <div class="chart-row r2" style="margin-top:18px">
+    <div class="card">
+      <div class="card-title">Top 20 Subjects / APIs</div>
+      <div class="card-sub">Most commonly filed drug substances & materials</div>
+      <div class="chart-wrap"><canvas id="subjectsChart" height="340"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Filing Vintage</div>
+      <div class="card-sub">Age profile of the DMF database by decade</div>
+      <div class="chart-wrap"><canvas id="vintageChart" height="340"></canvas></div>
+    </div>
+  </div>
+
+  <div class="section-label">Market Concentration</div>
+  <div class="chart-row" style="grid-template-columns:1fr">
+    <div class="card">
+      <div class="card-title">Holder Concentration — Pareto Analysis</div>
+      <div class="card-sub">Ranked holders + cumulative % of all DMFs (top 50 shown)</div>
+      <div class="chart-wrap"><canvas id="paretoChart" height="200"></canvas></div>
+    </div>
+  </div>
+
+  <div class="footer">FDA Drug Master File Dashboard · Data source: FDA DMF Registry · Built for analytical use only</div>
+</main>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════
+let RAW = [], FILTERED = [], CHARTS = {};
+
+// Filter selections — arrays of selected values, empty = ALL
+const SEL = { status: [], type: [], yearFrom: [], yearTo: [], holder: [] };
+
+// ═══════════════════════════════════════════════════════
+//  MULTI-SELECT COMPONENT
+// ═══════════════════════════════════════════════════════
+class MultiSelect {
+  constructor(containerId, opts) {
+    this.id = containerId;
+    this.label = opts.label;         // placeholder label
+    this.key = opts.key;             // key in SEL
+    this.single = opts.single||false;// single-select mode (year from/to)
+    this.searchable = opts.searchable||false;
+    this.maxDisplay = opts.maxDisplay||2;
+    this.container = document.getElementById(containerId);
+    this.options = [];               // [{value, label, count}]
+    this.open = false;
+    this._render();
+    this._bindClose();
+  }
+
+  _render() {
+    this.container.innerHTML = `
+      <div class="ms-trigger" id="${this.id}-trigger">
+        <span class="ms-label" id="${this.id}-lbl">${this.label}</span>
+        <svg class="ms-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="ms-dropdown" id="${this.id}-dd">
+        ${this.searchable ? `<div class="ms-search"><input type="text" placeholder="Search…" id="${this.id}-search" oninput="MSMAP['${this.id}']._filterList(this.value)"></div>` : ''}
+        ${!this.single ? `<div class="ms-actions">
+          <button onclick="MSMAP['${this.id}'].selectAll()">Select all</button>
+          <span class="sep">·</span>
+          <button onclick="MSMAP['${this.id}'].clearAll()">Clear</button>
+        </div>` : ''}
+        <div class="ms-list" id="${this.id}-list"></div>
+      </div>`;
+    document.getElementById(`${this.id}-trigger`).addEventListener('click', e => {
+      e.stopPropagation(); this._toggle();
+    });
+  }
+
+  _bindClose() {
+    document.addEventListener('click', e => {
+      if (!this.container.contains(e.target)) this._close();
+    });
+  }
+
+  _toggle() {
+    this.open = !this.open;
+    document.getElementById(`${this.id}-dd`).classList.toggle('open', this.open);
+    document.getElementById(`${this.id}-trigger`).classList.toggle('open', this.open);
+    if (this.open && this.searchable) {
+      setTimeout(() => document.getElementById(`${this.id}-search`)?.focus(), 50);
+    }
+  }
+
+  _close() {
+    this.open = false;
+    document.getElementById(`${this.id}-dd`)?.classList.remove('open');
+    document.getElementById(`${this.id}-trigger`)?.classList.remove('open');
+  }
+
+  setOptions(opts) {
+    // opts: [{value, label, count}]
+    this.options = opts;
+    this._renderList(opts);
+    this._updateTrigger();
+  }
+
+  _renderList(opts) {
+    const list = document.getElementById(`${this.id}-list`);
+    if (!list) return;
+    if (!opts.length) { list.innerHTML = `<div class="ms-empty">No options</div>`; return; }
+    const sel = SEL[this.key];
+    list.innerHTML = opts.map(o => `
+      <label class="ms-option ${sel.includes(o.value)?'selected':''}" data-val="${o.value}">
+        <input type="checkbox" ${sel.includes(o.value)?'checked':''} onchange="MSMAP['${this.id}']._onChange('${o.value}', this.checked)">
+        <span class="opt-label">${o.label}</span>
+        ${o.count!==undefined?`<span class="opt-count">${o.count.toLocaleString()}</span>`:''}
+      </label>`).join('');
+  }
+
+  _filterList(q) {
+    const filtered = this.options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()));
+    this._renderList(filtered);
+  }
+
+  _onChange(value, checked) {
+    if (this.single) {
+      SEL[this.key] = checked ? [value] : [];
+      // re-render to uncheck others
+      this._renderList(this.options);
+    } else {
+      if (checked) { if (!SEL[this.key].includes(value)) SEL[this.key].push(value); }
+      else { SEL[this.key] = SEL[this.key].filter(v => v !== value); }
+      // update selected class
+      document.querySelectorAll(`#${this.id}-list .ms-option`).forEach(el => {
+        el.classList.toggle('selected', SEL[this.key].includes(el.dataset.val));
+      });
+    }
+    this._updateTrigger();
+    applyFilters();
+  }
+
+  _updateTrigger() {
+    const lbl = document.getElementById(`${this.id}-lbl`);
+    const trigger = document.getElementById(`${this.id}-trigger`);
+    const sel = SEL[this.key];
+    // remove old badge
+    trigger.querySelectorAll('.ms-badge').forEach(b => b.remove());
+    if (!sel.length) {
+      lbl.textContent = this.label;
+    } else if (sel.length <= this.maxDisplay) {
+      lbl.textContent = sel.map(v => {
+        const o = this.options.find(x => x.value === v);
+        return o ? o.label : v;
+      }).join(', ');
+    } else {
+      lbl.textContent = this.label;
+      const badge = document.createElement('span');
+      badge.className = 'ms-badge';
+      badge.textContent = sel.length;
+      trigger.insertBefore(badge, trigger.querySelector('.ms-arrow'));
+    }
+  }
+
+  selectAll() {
+    SEL[this.key] = this.options.map(o => o.value);
+    this._renderList(this.options);
+    this._updateTrigger();
+    applyFilters();
+  }
+
+  clearAll() {
+    SEL[this.key] = [];
+    this._renderList(this.options);
+    this._updateTrigger();
+    applyFilters();
+  }
+
+  reset() {
+    SEL[this.key] = [];
+    this._renderList(this.options);
+    this._updateTrigger();
+  }
+}
+
+// Registry so options/event handlers can find instances
+const MSMAP = {};
+
+function initFilters() {
+  MSMAP['ms-status'] = new MultiSelect('ms-status', { label:'All Status', key:'status', maxDisplay:2 });
+  MSMAP['ms-type']   = new MultiSelect('ms-type',   { label:'All Types',  key:'type',   maxDisplay:3 });
+  MSMAP['ms-year-from'] = new MultiSelect('ms-year-from', { label:'From Year', key:'yearFrom', single:true });
+  MSMAP['ms-year-to']   = new MultiSelect('ms-year-to',   { label:'To Year',   key:'yearTo',   single:true });
+  MSMAP['ms-holder'] = new MultiSelect('ms-holder', { label:'All Holders', key:'holder', searchable:true, maxDisplay:1 });
+}
+
+function populateFilterOptions() {
+  // Status
+  const statusCounts = { A:0, I:0 };
+  RAW.forEach(r => { if (statusCounts[r.status]!==undefined) statusCounts[r.status]++; });
+  MSMAP['ms-status'].setOptions([
+    { value:'A', label:'Active (A)',   count: statusCounts.A },
+    { value:'I', label:'Inactive (I)', count: statusCounts.I },
+  ]);
+
+  // Types
+  const typeCounts = {};
+  RAW.forEach(r => { typeCounts[r.type] = (typeCounts[r.type]||0)+1; });
+  MSMAP['ms-type'].setOptions(
+    ['I','II','III','IV','V'].filter(t => typeCounts[t]).map(t => ({ value:t, label:'Type '+t, count: typeCounts[t] }))
+  );
+
+  // Years
+  const years = [...new Set(RAW.map(r => r.year).filter(Boolean))].sort();
+  const yearOpts = years.map(y => ({ value:String(y), label:String(y) }));
+  MSMAP['ms-year-from'].setOptions(yearOpts);
+  MSMAP['ms-year-to'].setOptions([...yearOpts].reverse());
+
+  // Holders — top 200 by count, rest searchable
+  const holderCounts = {};
+  RAW.forEach(r => { holderCounts[r.holder] = (holderCounts[r.holder]||0)+1; });
+  const holderOpts = Object.entries(holderCounts)
+    .sort((a,b) => b[1]-a[1])
+    .map(([h,c]) => ({ value:h, label:h.charAt(0)+h.slice(1).toLowerCase(), count:c }));
+  MSMAP['ms-holder'].setOptions(holderOpts);
+}
+
+function resetAllFilters() {
+  Object.values(MSMAP).forEach(ms => ms.reset());
+  applyFilters();
+}
+
+// ═══════════════════════════════════════════════════════
+//  FILE HANDLING
+// ═══════════════════════════════════════════════════════
+function handleFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  showLoading(true);
+  document.getElementById('upload-status').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type:'array', cellDates:true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(ws, { header:1, raw:false, dateNF:'YYYY-MM-DD' });
+
+      let headerRow = 0;
+      for (let i = 0; i < Math.min(raw.length, 5); i++) {
+        if (raw[i] && raw[i].join(' ').toUpperCase().includes('DMF')) { headerRow = i; break; }
+      }
+      const headers = raw[headerRow].map(h => String(h||'').trim().toUpperCase());
+      const idx = h => headers.findIndex(x => x.includes(h));
+      const iDMF=idx('DMF'), iStatus=idx('STATUS'), iType=idx('TYPE'),
+            iDate=idx('DATE'), iHolder=idx('HOLDER'), iSubject=idx('SUBJECT');
+
+      RAW = [];
+      for (let i = headerRow+1; i < raw.length; i++) {
+        const r = raw[i];
+        if (!r || !r[iStatus]) continue;
+        let year = null;
+        const d = new Date(r[iDate]);
+        if (!isNaN(d)) year = d.getFullYear();
+        RAW.push({
+          dmf: r[iDMF],
+          status: String(r[iStatus]||'').trim().toUpperCase(),
+          type:   String(r[iType]||'').trim().toUpperCase(),
+          year,
+          holder:  String(r[iHolder]||'').trim().toUpperCase(),
+          subject: String(r[iSubject]||'').trim().toUpperCase()
+        });
+      }
+
+      // Reset all selections before populating
+      Object.keys(SEL).forEach(k => SEL[k] = []);
+      populateFilterOptions();
+      applyFilters();
+      document.getElementById('last-update').textContent =
+        `Loaded: ${file.name} · ${RAW.length.toLocaleString()} records`;
+    } catch(err) {
+      alert('Could not parse file: ' + err.message);
+    } finally {
+      showLoading(false);
+      input.value = '';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function showLoading(v) { document.getElementById('loading').classList.toggle('show', v); }
+
+// ═══════════════════════════════════════════════════════
+//  FILTERING
+// ═══════════════════════════════════════════════════════
+function applyFilters() {
+  const { status, type, yearFrom, yearTo, holder } = SEL;
+  const fy = yearFrom.length ? +yearFrom[0] : null;
+  const ty = yearTo.length   ? +yearTo[0]   : null;
+
+  FILTERED = RAW.filter(r => {
+    if (status.length && !status.includes(r.status)) return false;
+    if (type.length   && !type.includes(r.type))     return false;
+    if (fy && r.year < fy) return false;
+    if (ty && r.year > ty) return false;
+    if (holder.length && !holder.includes(r.holder)) return false;
+    return true;
+  });
+
+  document.getElementById('filter-count').textContent =
+    `${FILTERED.length.toLocaleString()} of ${RAW.length.toLocaleString()} records`;
+
+  renderAll();
+}
+
+// ═══════════════════════════════════════════════════════
+//  CHART HELPERS
+// ═══════════════════════════════════════════════════════
+function fmtN(n) { return n.toLocaleString(); }
+function pct(a,b) { return b ? ((a/b)*100).toFixed(1)+'%' : '—'; }
+
+const TYPE_COLORS = { I:'#6366f1', II:'#3b82f6', III:'#10b981', IV:'#f59e0b', V:'#ef4444' };
+const TYPE_ORDER  = ['I','II','III','IV','V'];
+
+const CD = {
+  responsive: true, animation: { duration: 500 },
+  plugins: {
+    legend: { labels: { color:'#7d8590', font:{ size:11 }, boxWidth:12, padding:12 } },
+    tooltip: { backgroundColor:'#1c2333', borderColor:'#21262d', borderWidth:1, titleColor:'#e6edf3', bodyColor:'#7d8590', padding:10 }
+  },
+  scales: {
+    x: { grid:{ color:'#1a1f27' }, ticks:{ color:'#7d8590', font:{ size:10 } } },
+    y: { grid:{ color:'#1a1f27' }, ticks:{ color:'#7d8590', font:{ size:10 } } }
+  }
+};
+
+function mkChart(id, config) {
+  if (CHARTS[id]) CHARTS[id].destroy();
+  const ctx = document.getElementById(id);
+  if (ctx) CHARTS[id] = new Chart(ctx, config);
+}
+
+// ═══════════════════════════════════════════════════════
+//  RENDER ALL
+// ═══════════════════════════════════════════════════════
+function renderAll() {
+  renderKPIs(); renderTrend(); renderTypeDistribution();
+  renderStackedType(); renderActiveRate(); renderTypeTrend();
+  renderCumulative(); renderHoldersTable(); renderActiveHoldersTable();
+  renderSubjectsChart(); renderVintage(); renderPareto();
+}
+
+function renderKPIs() {
+  const d = FILTERED, total = d.length;
+  const active   = d.filter(r => r.status==='A').length;
+  const inactive = d.filter(r => r.status==='I').length;
+  const holders  = new Set(d.map(r => r.holder)).size;
+  const thisYear = new Date().getFullYear();
+  const newYTD   = d.filter(r => r.year===thisYear).length;
+
+  const cards = [
+    { label:'Total DMFs',     value:fmtN(total),    sub:'All records',          cls:'c1 b1' },
+    { label:'Active DMFs',    value:fmtN(active),   sub:pct(active,total)+' of total', cls:'c2 b2' },
+    { label:'Inactive DMFs',  value:fmtN(inactive), sub:pct(inactive,total)+' of total', cls:'c3 b3' },
+    { label:'Active Rate',    value:pct(active,total), sub:'Live portfolio',    cls:'c4 b4' },
+    { label:'Unique Holders', value:fmtN(holders),  sub:'Distinct companies',  cls:'c5 b5' },
+    { label:'Filed '+thisYear,value:fmtN(newYTD),   sub:'New submissions YTD', cls:'c6 b6' },
+  ];
+  document.getElementById('kpi-grid').innerHTML = cards.map(c => {
+    const [cc,bc] = c.cls.split(' ');
+    return `<div class="kpi"><div class="kpi-label">${c.label}</div><div class="kpi-value ${cc}">${c.value}</div><div class="kpi-sub">${c.sub}</div><div class="kpi-bar ${bc}" style="width:100%"></div></div>`;
+  }).join('');
+}
+
+function renderTrend() {
+  const byYear = {};
+  FILTERED.forEach(r => { if(r.year) byYear[r.year]=(byYear[r.year]||0)+1; });
+  const years = Object.keys(byYear).sort();
+  mkChart('trendChart', {
+    type:'bar',
+    data:{ labels:years, datasets:[{ label:'DMFs Filed', data:years.map(y=>byYear[y]),
+      backgroundColor: years.map(y=>+y>=2000?'rgba(59,130,246,.7)':'rgba(59,130,246,.3)'), borderRadius:3 }] },
+    options:{ ...CD, plugins:{...CD.plugins,legend:{display:false}}, scales:{...CD.scales,y:{...CD.scales.y,beginAtZero:true}} }
+  });
+}
+
+function renderTypeDistribution() {
+  const byType = {};
+  FILTERED.forEach(r => { byType[r.type]=(byType[r.type]||0)+1; });
+  const types = TYPE_ORDER.filter(t => byType[t]);
+  mkChart('typeChart', {
+    type:'doughnut',
+    data:{ labels:types.map(t=>'Type '+t), datasets:[{ data:types.map(t=>byType[t]||0),
+      backgroundColor:types.map(t=>TYPE_COLORS[t]||'#555'), borderWidth:2, borderColor:'#161b22' }] },
+    options:{ responsive:true, animation:{duration:500},
+      plugins:{ legend:{position:'right',labels:{color:'#7d8590',font:{size:11},boxWidth:12}}, tooltip:CD.plugins.tooltip },
+      cutout:'58%' }
+  });
+}
+
+function renderStackedType() {
+  const data = {}; TYPE_ORDER.forEach(t => data[t]={A:0,I:0});
+  FILTERED.forEach(r => { if(data[r.type]) data[r.type][r.status]=(data[r.type][r.status]||0)+1; });
+  const types = TYPE_ORDER.filter(t => (data[t].A+data[t].I)>0);
+  mkChart('stackedTypeChart', {
+    type:'bar',
+    data:{ labels:types.map(t=>'Type '+t), datasets:[
+      { label:'Active',   data:types.map(t=>data[t].A), backgroundColor:'rgba(16,185,129,.75)', borderRadius:3 },
+      { label:'Inactive', data:types.map(t=>data[t].I), backgroundColor:'rgba(239,68,68,.65)',  borderRadius:3 }
+    ]},
+    options:{ ...CD, scales:{ ...CD.scales, x:{...CD.scales.x,stacked:true}, y:{...CD.scales.y,stacked:true,beginAtZero:true} } }
+  });
+}
+
+function renderActiveRate() {
+  const byYear = {};
+  FILTERED.forEach(r => {
+    if(!r.year) return;
+    if(!byYear[r.year]) byYear[r.year]={total:0,active:0};
+    byYear[r.year].total++;
+    if(r.status==='A') byYear[r.year].active++;
+  });
+  const years = Object.keys(byYear).sort();
+  const rates = years.map(y => +(byYear[y].active/byYear[y].total*100).toFixed(1));
+  mkChart('activeRateChart', {
+    type:'line',
+    data:{ labels:years, datasets:[{ label:'Active %', data:rates, borderColor:'#10b981',
+      backgroundColor:'rgba(16,185,129,.08)', fill:true, tension:0.3, pointRadius:0, pointHoverRadius:4 }] },
+    options:{ ...CD, plugins:{...CD.plugins,legend:{display:false}},
+      scales:{...CD.scales, y:{...CD.scales.y, min:0, max:100, ticks:{...CD.scales.y.ticks, callback:v=>v+'%'}}} }
+  });
+}
+
+function renderTypeTrend() {
+  const byYT = {};
+  FILTERED.forEach(r => {
+    if(!r.year) return;
+    if(!byYT[r.year]) byYT[r.year]={};
+    byYT[r.year][r.type]=(byYT[r.year][r.type]||0)+1;
+  });
+  const years = Object.keys(byYT).sort().filter(y=>+y>=1990);
+  mkChart('typeTrendChart', {
+    type:'line',
+    data:{ labels:years, datasets:TYPE_ORDER.map(t=>({
+      label:'Type '+t, data:years.map(y=>byYT[y]?.[t]||0),
+      borderColor:TYPE_COLORS[t], backgroundColor:'transparent',
+      tension:0.3, borderWidth:2, pointRadius:0, pointHoverRadius:3
+    }))},
+    options:{ ...CD }
+  });
+}
+
+function renderCumulative() {
+  const byYear = {};
+  FILTERED.forEach(r => { if(r.year) byYear[r.year]=(byYear[r.year]||0)+1; });
+  const years = Object.keys(byYear).sort();
+  let cum = 0;
+  const cumData = years.map(y => { cum+=byYear[y]; return cum; });
+  mkChart('cumulativeChart', {
+    type:'line',
+    data:{ labels:years, datasets:[{ label:'Total DMFs Filed', data:cumData, borderColor:'#8b5cf6',
+      backgroundColor:'rgba(139,92,246,.1)', fill:true, tension:0.3, pointRadius:0, pointHoverRadius:4 }] },
+    options:{ ...CD, plugins:{...CD.plugins,legend:{display:false}} }
+  });
+}
+
+function renderHoldersTable() {
+  const counts = {};
+  FILTERED.forEach(r => { counts[r.holder]=(counts[r.holder]||0)+1; });
+  const top = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,20);
+  const max = top[0]?.[1]||1;
+  const rows = top.map(([h,c],i) => `<tr>
+    <td><span class="rank-num">${i+1}</span></td>
+    <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${h}">${h}</td>
+    <td style="font-family:JetBrains Mono,monospace;font-size:11px">${c.toLocaleString()}<span class="bar-inline" style="width:${Math.round(c/max*80)}px"></span></td>
+  </tr>`).join('');
+  document.getElementById('holders-table-wrap').innerHTML =
+    `<table class="data-table"><thead><tr><th>#</th><th>Holder</th><th>DMFs</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderActiveHoldersTable() {
+  const counts = {};
+  FILTERED.filter(r=>r.status==='A').forEach(r => { counts[r.holder]=(counts[r.holder]||0)+1; });
+  const top = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,20);
+  const max = top[0]?.[1]||1;
+  const rows = top.map(([h,c],i) => `<tr>
+    <td><span class="rank-num">${i+1}</span></td>
+    <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${h}">${h}</td>
+    <td style="font-family:JetBrains Mono,monospace;font-size:11px">${c.toLocaleString()}<span class="bar-inline" style="width:${Math.round(c/max*80)}px;background:#10b981"></span></td>
+  </tr>`).join('');
+  document.getElementById('active-holders-table-wrap').innerHTML =
+    `<table class="data-table"><thead><tr><th>#</th><th>Holder</th><th>Active</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderSubjectsChart() {
+  const counts = {};
+  FILTERED.forEach(r => { if(r.subject) counts[r.subject]=(counts[r.subject]||0)+1; });
+  const top = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,20);
+  mkChart('subjectsChart', {
+    type:'bar',
+    data:{ labels:top.map(([s])=>s.length>40?s.slice(0,38)+'…':s),
+      datasets:[{ data:top.map(([,c])=>c), backgroundColor:'rgba(59,130,246,.65)', borderRadius:3 }] },
+    options:{ indexAxis:'y', ...CD, plugins:{...CD.plugins,legend:{display:false}},
+      scales:{ x:{...CD.scales.x,beginAtZero:true}, y:{...CD.scales.y,ticks:{color:'#7d8590',font:{size:10}}} } }
+  });
+}
+
+function renderVintage() {
+  const buckets = [
+    {label:'Pre-1970',  test:y=>y<1970},
+    {label:'1970–1979', test:y=>y>=1970&&y<=1979},
+    {label:'1980–1989', test:y=>y>=1980&&y<=1989},
+    {label:'1990–1999', test:y=>y>=1990&&y<=1999},
+    {label:'2000–2009', test:y=>y>=2000&&y<=2009},
+    {label:'2010–2019', test:y=>y>=2010&&y<=2019},
+    {label:'2020+',     test:y=>y>=2020},
+  ];
+  const colors = ['#6366f1','#3b82f6','#22d3ee','#10b981','#f59e0b','#ef4444','#ec4899'];
+  mkChart('vintageChart', {
+    type:'bar',
+    data:{ labels:buckets.map(b=>b.label),
+      datasets:[{ data:buckets.map(b=>FILTERED.filter(r=>r.year&&b.test(r.year)).length),
+        backgroundColor:colors, borderRadius:5 }] },
+    options:{ ...CD, plugins:{...CD.plugins,legend:{display:false}},
+      scales:{...CD.scales,y:{...CD.scales.y,beginAtZero:true}} }
+  });
+}
+
+function renderPareto() {
+  const counts = {};
+  FILTERED.forEach(r => { counts[r.holder]=(counts[r.holder]||0)+1; });
+  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,50);
+  const total = FILTERED.length;
+  let cum = 0;
+  const cumPct = sorted.map(([,c]) => { cum+=c; return +(cum/total*100).toFixed(1); });
+  mkChart('paretoChart', {
+    type:'bar',
+    data:{ labels:sorted.map(([h])=>h.length>22?h.slice(0,20)+'…':h), datasets:[
+      { type:'bar',  label:'DMF Count',    data:sorted.map(([,c])=>c), backgroundColor:'rgba(59,130,246,.65)', borderRadius:2, yAxisID:'y' },
+      { type:'line', label:'Cumulative %', data:cumPct, borderColor:'#f59e0b', backgroundColor:'transparent', pointRadius:0, tension:0.2, yAxisID:'y2' }
+    ]},
+    options:{ ...CD, scales:{
+      x:{...CD.scales.x, ticks:{...CD.scales.x.ticks, maxRotation:55, minRotation:40}},
+      y:{...CD.scales.y, beginAtZero:true, position:'left'},
+      y2:{ position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#7d8590',font:{size:10},callback:v=>v+'%'}, min:0, max:100 }
+    }}
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════
+initFilters();
+</script>
+</body>
+</html>
